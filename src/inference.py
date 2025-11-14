@@ -9,7 +9,7 @@ import argparse, json, os
 import numpy as np
 import torch
 
-from model import CaptureBeefyCNNNet, CaptureLightningModule
+from .model import CaptureNetDeep, CaptureLightningModule
 
 def window_predict(signal: np.ndarray, model: torch.nn.Module, window_size=2000, step_size=2200, cutoff=0.524, device="cpu"):
     model.eval()
@@ -50,7 +50,7 @@ def merge_windows(labels, spans):
     return intervals
 
 def load_checkpoint(ckpt_path, dropout=0.739, device="cpu"):
-    base = CaptureBeefyCNNNet(dropout=dropout)
+    base = CaptureNetDeep(dropout=dropout)
     lit = CaptureLightningModule.load_from_checkpoint(ckpt_path, model=base, map_location=device)
     return lit.model.to(device).eval(), getattr(lit.hparams, "cutoff", 0.524)
 

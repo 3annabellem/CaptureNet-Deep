@@ -7,7 +7,7 @@ from collections import Counter
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
-from model import CaptureBeefyCNNNet, CaptureLightningModule
+from .model import CaptureNetDeep, CaptureLightningModule
 
 # ---------- Dataset that windows full traces on-the-fly ----------
 class CaptureWindowDataset(Dataset):
@@ -116,7 +116,7 @@ def main():
     neg, pos = int(max(counts[0].item(), 1)), int(max(counts[1].item(), 1))
     pos_weight = neg / pos
 
-    model = CaptureBeefyCNNNet(dropout=args.dropout)
+    model = CaptureNetDeep(dropout=args.dropout)
     lit = CaptureLightningModule(model, lr=args.lr, weight_decay=args.wd, cutoff=args.cutoff, pos_weight=pos_weight)
 
     os.makedirs(args.out_dir, exist_ok=True)

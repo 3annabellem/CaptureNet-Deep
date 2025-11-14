@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 
 # -------- Core 1D CNN (logits out; no sigmoid) --------
-class CaptureBeefyCNNNet(nn.Module):
+class CaptureNetDeep(nn.Module):
     def __init__(self, dropout=0.3):
         super().__init__()
         self.conv1 = nn.Conv1d(1, 64, 5, padding=2);  self.bn1 = nn.BatchNorm1d(64)

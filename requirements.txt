@@ -3,3 +3,11 @@ pytorch-lightning>=2.2
 pandas>=2.0
 numpy>=1.24
 scikit-learn>=1.3
+matplotlib
+
+# Dashboard dependencies
+PyQt5>=5.15.0
+pyqtgraph>=0.13.0
+paramiko>=2.8.0
+h5py>=3.0.0
+scipy>=1.7.0
