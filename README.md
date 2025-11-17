@@ -3,7 +3,7 @@ Deep learning model for automated detection of capture phases in nanopore protei
 
 > **Citation**: Martin A., Kontogiorgos-Heintz D., Nivala J., "CaptureNet-Deep: Deep learning identification of capture phases in nanopore protein sequencing data," *Bioinformatics*, 2025.
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.YYYYYYY.svg)](https://doi.org/10.5281/zenodo.YYYYYYY)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17635379.svg)](https://doi.org/10.5281/zenodo.17635379)
 
 ## Quick Demo (2 minutes)
 
