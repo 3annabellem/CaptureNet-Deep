@@ -161,7 +161,7 @@ def create_fast5_file(signals, filename, sampling_rate=4000):
             meta_group.attrs['offset'] = 10.0  # ADC offset
             meta_group.attrs['range'] = 2000.0  # ADC range
             meta_group.attrs['digitisation'] = 8192.0  # ADC digitisation
-            meta_group.attrs['sampling_rate'] = float(sampling_rate)
+            meta_group.attrs['sample_rate'] = float(sampling_rate)  # Note: sample_rate not sampling_rate
             
             # Optional: Add channel info
             chan_group.attrs['channel_number'] = channel_num
@@ -176,13 +176,27 @@ def create_fast5_file(signals, filename, sampling_rate=4000):
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
+def cleanup_bin_files():
+    """Remove existing .bin files from fast5_data directory"""
+    fast5_data_dir = "fast5_data"
+    if os.path.exists(fast5_data_dir):
+        bin_files = [f for f in os.listdir(fast5_data_dir) if f.endswith('.bin')]
+        if bin_files:
+            print(f"Cleaning up {len(bin_files)} existing .bin files from {fast5_data_dir}/")
+            for bin_file in bin_files:
+                try:
+                    os.remove(os.path.join(fast5_data_dir, bin_file))
+                except OSError as e:
+                    print(f"Warning: Could not remove {bin_file}: {e}")
+            print("Cleanup complete.")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--length", type=int, default=60000, help="Signal length in samples")
     ap.add_argument("--seed", type=int, default=42, help="Random seed")
     ap.add_argument("--out-prefix", type=str, default="demo", help="Filename prefix for outputs")
     ap.add_argument("--out-dir", type=str, default="data")
-    ap.add_argument("--channels", type=int, default=8, help="Number of channels for FAST5 (dashboard testing)")
+    ap.add_argument("--channels", type=int, default=512, help="Number of channels for FAST5 (dashboard testing)")
     ap.add_argument("--csv-only", action="store_true", help="Generate CSV format only")
     ap.add_argument("--fast5-only", action="store_true", help="Generate FAST5 format only")
     args = ap.parse_args()
@@ -220,28 +234,48 @@ def main():
     if not args.csv_only and HAS_H5PY:
         print(f"\nGenerating FAST5 format for dashboard testing ({args.channels} channels)...")
         
+        # Clean up any existing bin files that might interfere
+        cleanup_bin_files()
+        
         # Generate signals for multiple channels
         signals = {}
         total_captures = 0
+        capture_channels = []
+        dead_channels = []
+        open_pore_channels = []
+        
+        # Initialize random number generator for consistent channel type assignment
+        channel_rng = np.random.default_rng(args.seed)
         
         for ch in range(1, args.channels + 1):
             channel_seed = args.seed + ch
             
-            # Mix of channel types for realistic testing
-            if ch <= 2:
+            # Randomly choose channel type
+            # Probability: ~30% capture, ~10% dead, ~60% open pore (realistic for nanopore)
+            channel_type = channel_rng.choice(['capture', 'dead', 'open_pore'], p=[0.3, 0.1, 0.6])
+            
+            if channel_type == 'capture':
                 # Channels with captures (most interesting)
                 sig, caps = synth_signal(length=args.length, seed=channel_seed)
                 total_captures += len(caps)
-            elif ch <= 4:
+                capture_channels.append(ch)
+            elif channel_type == 'dead':
                 # Dead channels
                 sig, caps = synth_dead_channel(length=args.length, seed=channel_seed)
-            else:
+                dead_channels.append(ch)
+            else:  # open_pore
                 # Noisy open pore channels
                 sig, caps = synth_noise_channel(length=args.length, seed=channel_seed)
+                open_pore_channels.append(ch)
             
-            # Convert to int16 (typical for FAST5)
-            sig_int16 = np.round(sig * 100).astype(np.int16)  # Scale for int16 range
-            signals[ch] = (sig_int16, caps)
+            # Convert to int16 ADC values that will convert back to realistic pA
+            # Dashboard formula: current = (signal + offset) * (range / digitisation)
+            # We want: ~100 pA baseline, ~20 pA captures
+            # So: signal = (current * digitisation / range) - offset
+            # For 100 pA: signal = (100 * 8192 / 2000) - 10 ≈ 400
+            # For 20 pA: signal = (20 * 8192 / 2000) - 10 ≈ 72
+            adc_signal = ((sig * 8192.0 / 2000.0) - 10.0).astype(np.int16)
+            signals[ch] = (adc_signal, caps)
 
         # Create FAST5 file
         fast5_path = os.path.join(args.out_dir, f"{args.out_prefix}_dashboard.fast5")
@@ -249,6 +283,9 @@ def main():
         
         print(f"Wrote FAST5 format: {fast5_path}")
         print(f"Channels: {args.channels}, Total captures: {total_captures}")
+        print(f"Channel distribution: {len(capture_channels)} capture, {len(dead_channels)} dead, {len(open_pore_channels)} open pore")
+        print(f"Sample capture channels: {capture_channels[:10]}")
+        print(f"Sample dead channels: {dead_channels[:10]}")
         
     elif not args.csv_only and not HAS_H5PY:
         print("\nSkipping FAST5 generation: h5py not available")

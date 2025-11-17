@@ -35,6 +35,56 @@ class ClickablePlotWidget(pg.PlotWidget):
 
 import torch.nn.functional as F
 
+class CaptureBeefyCNNNet(nn.Module):
+    def __init__(self, dropout=0.3):
+        super(CaptureBeefyCNNNet, self).__init__()
+        self.conv1 = nn.Conv1d(1, 64, kernel_size=5, padding=2)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, 128, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=5, padding=2)
+        self.bn3 = nn.BatchNorm1d(256)
+        self.conv4 = nn.Conv1d(256, 256, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm1d(256)
+        self.conv5 = nn.Conv1d(256, 256, kernel_size=3, padding=1)
+        self.bn5 = nn.BatchNorm1d(256)
+        self.dropout = nn.Dropout(dropout)
+        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Linear(256, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = x.unsqueeze(1) 
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.bn4(self.conv4(x)))
+        x = F.relu(self.bn5(self.conv5(x)))
+        x = self.dropout(x)
+        x = self.global_avg_pool(x)
+        x = x.squeeze(2)
+        x = self.fc(x) 
+        x = self.sigmoid(x).squeeze(1)
+        return x
+
+class Config_100:
+    CHUNK_SIZE = 2**11  # later -- 65,536 points
+    
+    # Training params
+    BATCH_SIZE = 32 #128*2*2
+    EPOCHS = 10
+    LEARNING_RATE = 0.001
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    DOWNSAMPLE = 100
+    
+    DF_PATH = 'all_'
+    
+    CLIP_MIN = -1
+    CLIP_MAX = 160
+    DATA_MEAN = 17.17 #np.mean(df.raw.apply(np.mean))
+    DATA_STD = 24.02 #np.mean(df.raw.apply(np.std))
+
 class CaptureNetDeep(nn.Module):
     def __init__(self, dropout=0.3):
         super(CaptureNetDeep, self).__init__()
@@ -338,7 +388,6 @@ class ImportFast5(QMainWindow):
 
         # Load the trained model weights
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # Use the integrated CaptureNet-Deep model
         model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models', 'best-model.ckpt')
         checkpoint = torch.load(model_path, map_location=self.device)
         state_dict = checkpoint['state_dict'] if 'state_dict' in checkpoint else checkpoint
@@ -348,34 +397,9 @@ class ImportFast5(QMainWindow):
         # Set model to evaluation mode
         self.capture_model.eval()
 
-        # TODO: Add translocation model when available
-        self.translocation_model = None  # TranslocationUNet1D()
-        # translocation_model_path = 'unet1d_model_100ds_2048CS_9epoch.pth'
-
-        # print("Loading translocation weights from:", translocation_model_path)
-        # ckpt = torch.load(translocation_model_path, map_location="cpu")
-
-        # show all the running_mean shapes in *this* file
-        # for name, tensor in ckpt.items():
-        #     if "running_mean" in name:
-        #         print(f"{name}: {tuple(tensor.shape)}")
-
-        # for name, mod in self.translocation_model.named_modules():
-        #     if isinstance(mod, nn.BatchNorm1d):
-        #         assert mod.num_features in (64,128,256,512)
-        # print("All BN layers match the 64–512 channel ranges.")
-
-
-        # self.translocation_model.load_state_dict(torch.load(translocation_model_path, map_location=self.device))
-
-        # ckpt = torch.load(translocation_model_path, map_location="cpu")
-        # for key, val in ckpt.items():
-        #     if "running_mean" in key:
-        #         print(key, val.shape)
-
-        # for name, mod in self.translocation_model.named_modules():
-        #     if isinstance(mod, nn.BatchNorm1d):
-        #         print(name, mod.num_features)
+        # Disable translocation model for now since the model file doesn't exist
+        self.translocation_model = None
+        print("Translocation model disabled - model file not found")
 
         # Setup for translocation channels
         translocation_layout = QHBoxLayout()
@@ -483,15 +507,33 @@ class ImportFast5(QMainWindow):
                 print(f"finished channels: {number-19} to {str(number)}")
             channel = '/Raw/Channel_' + str(number) + '/'
             signal = '/Raw/Channel_' + str(number) + '/Signal'
-            file_load = h5py.File(fn, mode="r").get(channel)
-            file_meta = file_load["Meta"]
-            offset = file_meta.attrs["offset"]
-            digitisation = file_meta.attrs["digitisation"]
-            _range = file_meta.attrs["range"]
-            if sampling_rate and file_meta.attrs["sample_rate"] != sampling_rate:
-                print("DANGER: sampling rate is NOT THE SAME FOR ALL RUNS -- must adjust segmentation algo for this")
-                print("Changed from ", sampling_rate, 'to', file_meta.attrs["sample_rate"])
-            sampling_rate = file_meta.attrs["sample_rate"]
+            try:
+                file_load = h5py.File(fn, mode="r").get(channel)
+                if file_load is None:
+                    print(f"Warning: Channel {number} not found in file, skipping")
+                    continue
+                
+                file_meta = file_load["Meta"]
+                if file_meta is None:
+                    print(f"Warning: No metadata found for channel {number}, skipping")
+                    continue
+                    
+                offset = file_meta.attrs.get("offset", 0.0)
+                digitisation = file_meta.attrs.get("digitisation", 8192.0)
+                _range = file_meta.attrs.get("range", 2000.0)
+                
+                current_sample_rate = file_meta.attrs.get("sample_rate")
+                if current_sample_rate is None:
+                    print(f"Warning: No sample_rate found for channel {number}, using default 4000")
+                    current_sample_rate = 4000.0
+                    
+                if sampling_rate and current_sample_rate != sampling_rate:
+                    print("DANGER: sampling rate is NOT THE SAME FOR ALL RUNS -- must adjust segmentation algo for this")
+                    print("Changed from ", sampling_rate, 'to', current_sample_rate)
+                sampling_rate = current_sample_rate
+            except Exception as e:
+                print(f"Error reading metadata for channel {number}: {e}")
+                continue
 
             signal = np.array(file_load["Signal"][start:end])
             
@@ -509,16 +551,17 @@ class ImportFast5(QMainWindow):
             del current
             gc.collect()
             
-        del fn
-        del sampling_rate
-        del channels_range
-        del number
-        del channel
-        del offset
-        del digitisation
-        del _range
-        del file_load
-        del file_meta
+        # Safe cleanup of local variables
+        if 'fn' in locals(): del fn
+        if 'sampling_rate' in locals(): del sampling_rate
+        if 'channels_range' in locals(): del channels_range
+        if 'number' in locals(): del number
+        if 'channel' in locals(): del channel
+        if 'offset' in locals(): del offset
+        if 'digitisation' in locals(): del digitisation
+        if '_range' in locals(): del _range
+        if 'file_load' in locals(): del file_load
+        if 'file_meta' in locals(): del file_meta
         gc.collect()
         
         return None
@@ -701,25 +744,22 @@ class ImportFast5(QMainWindow):
         for channel in channels:
             #print(f"Loading channel {channel}...")
             if (channel != 512) and (file != None):
-                with open(f"fast5_data/{channel + 1}_{self.file_name.split('/')[-1]}.bin", 'rb') as f:
-                    data = np.fromfile(f, dtype=np.float16)
+                try:
+                    with open(f"fast5_data/{channel + 1}_{self.file_name.split('/')[-1]}.bin", 'rb') as f:
+                        data = np.fromfile(f, dtype=np.float16)
+                except FileNotFoundError:
+                    print(f"Warning: Binary file not found for channel {channel + 1}, skipping visualization")
+                    continue
+                except Exception as e:
+                    print(f"Error reading binary file for channel {channel + 1}: {e}")
+                    continue
                 plot_widget = self.plots[channel]
 
-                averages = []
                 self.channel_length[channel] = len(data)
 
-                # Background processing of data
-                while len(data) > 100000:
-                    chunk = data[:100000].astype(np.float32)
-                    data = data[100000:]
-                    sum_chunk = 0
-                    for num in chunk:
-                        sum_chunk += num
-                    average = sum_chunk / 100000
-                    averages.append(average)
-
-                self.update_plot(plot_widget, averages, channel)
-                self.update_background(channel, plot_widget, averages)
+                # Use the full signal data directly (no downsampling needed)
+                self.update_plot(plot_widget, data, channel)
+                self.update_background(channel, plot_widget, data)
                 del data
                 self.num_channels_loaded += 1
         
@@ -736,14 +776,21 @@ class ImportFast5(QMainWindow):
 
     def update_background(self, channel, plot_widget, data):
         p = self.palette
-        with open(f"fast5_data/{channel + 1}_{self.file_name.split('/')[-1]}.bin", 'rb') as f:
-            long_data = np.fromfile(f, dtype=np.float16)
+        # Use the averaged data for dead channel detection (like the original)
+        long_data = data
+        
+        # Simple dead channel detection using signal averages
         if all(x < 5 for x in data[10:]):
             # too little signal → dead pore
             self.colors[channel] = p['red']
         else:
-            capture, capture_sections         = self.capture(long_data)
-            transloc, transloc_sections       = self.translocation(long_data)
+            # Read the full signal for model processing
+            with open(f"fast5_data/{channel + 1}_{self.file_name.split('/')[-1]}.bin", 'rb') as f:
+                full_data = np.fromfile(f, dtype=np.float16)
+                
+            capture, capture_sections = self.capture(full_data)
+            # Skip translocation detection since model is disabled
+            transloc, transloc_sections = False, []
 
             # record both
             self.captures[channel]     = capture_sections
@@ -779,6 +826,7 @@ class ImportFast5(QMainWindow):
     def update_background_counts(self):
         self.dead_text_label.setText(f"Dead channels: {self.dead_channels_count}")
         self.capture_text_label.setText(f"Channels with capture sections: {self.capture_channels_count}")
+        self.translocation_text_label.setText(f"Channels with translocations: {self.translocation_channels_count}")
         self.translocation_text_label.setText(f"Channels with translocations: {self.translocation_channels_count}")
 
     
@@ -910,9 +958,33 @@ class ImportFast5(QMainWindow):
 
     def capture(self, data):
         window_size = 1000
-        data = data[::100]
+        original_length = len(data)
+        
+        # Only downsample if signal is very long (> 1 million samples)
+        downsample_factor = 1
+        if original_length > 1000000:
+            downsample_factor = 100
+            data = data[::100]  # Downsample by factor 100
+            print(f"Signal length {original_length} > 1M, downsampling by factor {downsample_factor}")
+        else:
+            print(f"Signal length {original_length} <= 1M, no downsampling")
+        
         num_points = len(data)
+        print(f"Capture detection: original_length={original_length}, processed_length={num_points}")
+        
+        # Handle short signals by padding
+        if num_points < window_size:
+            if num_points < 100:  # Too short to analyze
+                print(f"Signal too short: {num_points} < 100")
+                return False, []
+            # Pad the data to minimum window size
+            padding_needed = window_size - num_points
+            data = np.pad(data, (0, padding_needed), mode='constant', constant_values=data.mean())
+            num_points = len(data)
+            print(f"Padded signal to {num_points} samples")
+        
         num_windows = num_points // window_size
+        print(f"Processing {num_windows} windows")
         labels = np.zeros(num_points)  # Initialize labels array
         confidenceArr = []
         
@@ -925,8 +997,15 @@ class ImportFast5(QMainWindow):
             # Convert to tensor and predict
             window_tensor = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
             likelihood = self.capture_model(window_tensor).item()  # Get the float output from the model
-            labels[start_idx:end_idx] = 1 if likelihood >= 0.8 else 0
-            confidenceArr.append(likelihood if likelihood >= 0.8 else 0)
+            
+            # Debug output for first few windows
+            if w < 3:
+                print(f"Window {w}: likelihood={likelihood:.4f}, window_stats: mean={window.mean():.2f}, std={window.std():.2f}")
+            
+            # Use sigmoid-like threshold for the model output
+            is_capture = likelihood >= 0.8
+            labels[start_idx:end_idx] = 1 if is_capture else 0
+            confidenceArr.append(likelihood if is_capture else 0)
 
         # Adjust isolated labels
         for w in range(1, num_windows-1):
@@ -946,8 +1025,8 @@ class ImportFast5(QMainWindow):
         for i in range(1, len(labels)):
             if labels[i] != current_label:
                 if current_label == 1:
-                    # Scale back to original sampling rate (multiply by 100)
-                    capture_sections.append([section_start * 100, (i - 1) * 100, confidence/count])
+                    # Scale back to original sampling rate (multiply by downsample_factor)
+                    capture_sections.append([section_start * downsample_factor, (i - 1) * downsample_factor, confidence/count])
                 current_label = labels[i]
                 section_start = i
                 confidence = 0
@@ -956,8 +1035,8 @@ class ImportFast5(QMainWindow):
             count += 1
         # Add the last section if it's a capture section
         if current_label == 1:
-            # Scale back to original sampling rate (multiply by 100)
-            capture_sections.append([section_start * 100, (len(labels) - 1) * 100, confidence/count])
+            # Scale back to original sampling rate (multiply by downsample_factor)
+            capture_sections.append([section_start * downsample_factor, (len(labels) - 1) * downsample_factor, confidence/count])
 
         capture = False
         if len(capture_sections) > 0:
