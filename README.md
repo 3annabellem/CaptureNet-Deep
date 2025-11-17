@@ -34,10 +34,13 @@ For users who prefer a graphical interface, CaptureNet-Deep includes a PyQt5-bas
 
 ### Dashboard Features
 - **Multi-channel visualization**: Real-time display of all 512 nanopore channels
+- **CaptureNet-Deep integration**: Uses the same model (`best-model.ckpt`) as command-line tools
 - **Interactive analysis**: Click channels for detailed view and capture confidence scores  
+- **Intelligent processing**: Automatic conditional downsampling for large signals (>1M samples)
 - **Batch processing**: Analyze complete FAST5 files with automatic capture detection
 - **Remote file access**: SSH connectivity for lab server integration
 - **Export capabilities**: Save analysis results as JSON with capture intervals
+- **Threading optimization**: Parallel processing across 8 threads for fast analysis
 
 ### Dashboard Usage
 
@@ -66,8 +69,21 @@ For users who prefer a graphical interface, CaptureNet-Deep includes a PyQt5-bas
 ### Generate Demo FAST5
 Create sample data for testing the dashboard:
 ```bash
-python data/generate_demo_data.py --fast5-only --channels 16
+# Generate realistic 512-channel demo with random channel types
+python data/generate_demo_data.py --fast5-only
+
+# Or customize channel count
+python data/generate_demo_data.py --fast5-only --channels 64
+
+# Generate both CSV (for notebooks) and FAST5 (for dashboard)
+python data/generate_demo_data.py
 ```
+
+**Demo data includes:**
+- **~30% capture channels**: Channels with detected capture events (shown in blue)
+- **~10% dead channels**: Inactive/closed pores (shown in red)
+- **~60% open pore channels**: Normal nanopore activity (default color)
+- **Automatic cleanup**: Removes old `.bin` files before generating new data
 
 ### Troubleshooting Dashboard
 If you encounter issues:
@@ -132,6 +148,10 @@ python -m src.inference \
 
 ### Pretrained Model
 A trained checkpoint is included: `models/best-model.ckpt`
+- **Parameters**: 601,473 trainable parameters
+- **Architecture**: CaptureNetDeep CNN (5 convolutional layers)
+- **Usage**: Used by both command-line inference and GUI dashboard
+- **Performance**: Optimized for 2000-sample windows with 0.524 decision threshold
 
 ## Model Architecture
 
@@ -151,10 +171,31 @@ A trained checkpoint is included: `models/best-model.ckpt`
 - **Features**: Automatic checkpointing, logging, and validation
 
 ## Technical Notes
-- Signals are processed in sliding windows (default: 2000 samples, 2200 step)
-- Simple smoothing removes isolated predictions: `[0,1,0]→[0,0,0]`, `[1,0,1]→[1,1,1]`
-- For paper experiments, raw signals were downsampled 100× before windowing
-- Training data from MISL (University of Washington) available on reasonable request
+- **Window processing**: Signals processed in sliding windows (default: 2000 samples, 2200 step)
+- **Smoothing**: Simple post-processing removes isolated predictions: `[0,1,0]→[0,0,0]`, `[1,0,1]→[1,1,1]`
+- **Conditional downsampling**: Dashboard automatically downsamples signals >1M samples (100×) for performance
+- **FAST5 format**: ADC conversion formula: `current = (signal + offset) × (range / digitisation)`
+- **Multi-threading**: Dashboard uses 8 threads processing 64-channel blocks for 512 total channels
+- **Paper experiments**: Raw signals were downsampled 100× before windowing
+- **Training data**: From MISL (University of Washington) available on reasonable request
+
+## Project Structure
+```
+CaptureNet-Deep/
+├── src/                    # Core ML modules
+│   ├── model.py           # CaptureNetDeep architecture
+│   ├── train.py           # Training script
+│   └── inference.py       # Command-line inference
+├── dashboard/             # GUI interface
+│   ├── start_screen.py    # Main dashboard entry point
+│   └── import_fast5.py    # FAST5 processing and analysis
+├── models/                # Trained checkpoints
+│   └── best-model.ckpt    # Pretrained CaptureNet-Deep model
+├── data/                  # Demo data and utilities
+│   └── generate_demo_data.py  # Synthetic FAST5 generator
+├── examples/              # Jupyter notebook demos
+└── launch_dashboard.py    # Cross-platform dashboard launcher
+```
 
 ## License
 MIT
