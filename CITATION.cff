@@ -1,0 +1,26 @@
+cff-version: 1.2.0 
+title: "CaptureNet-Deep"
+version: "v1.0"
+authors:
+  - family-names: Martin
+    given-names: Annabelle
+  - family-names: Kontogiorgos-Heintz
+    given-names: Daphne
+  - family-names: Nivala
+    given-names: Jeff
+doi: 10.5281/zenodo.YYYYYYY
+date-released: 2025-05-01
+license: MIT
+repository-code: https://github.com/3annabellem/CaptureNet-Deep
+preferred-citation:
+  type: article
+  title: "CaptureNet-Deep: Deep learning identification of capture phases in nanopore protein sequencing data"
+  authors:
+    - family-names: Martin
+      given-names: Annabelle
+    - family-names: Kontogiorgos-Heintz
+      given-names: Daphne
+    - family-names: Nivala
+      given-names: Jeff
+  journal: Bioinformatics
+  year: 2025
